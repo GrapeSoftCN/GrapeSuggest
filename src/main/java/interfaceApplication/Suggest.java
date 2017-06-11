@@ -2,7 +2,9 @@ package interfaceApplication;
 
 import java.io.FileInputStream;
 import java.text.ParseException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Properties;
 
 import org.bson.types.ObjectId;
@@ -12,7 +14,9 @@ import org.json.simple.JSONObject;
 import apps.appsProxy;
 import authority.privilige;
 import database.db;
+import esayhelper.CacheHelper;
 import esayhelper.JSONHelper;
+import esayhelper.StringHelper;
 import esayhelper.TimeHelper;
 import esayhelper.jGrapeFW_Message;
 import interrupt.interrupt;
@@ -30,6 +34,8 @@ public class Suggest {
 	private static int APPID = appsProxy.appid();
 	private static JSONObject UserInfo = new JSONObject();
 	private static HashMap<String, Object> map;
+	private List<String> imgList = new ArrayList<String>();
+	private List<String> videoList = new ArrayList<String>();
 
 	static {
 		map = new HashMap<String, Object>();
@@ -44,8 +50,8 @@ public class Suggest {
 	}
 
 	/**
-	 * 新增咨询建议信息 [支持实名咨询，匿名咨询]
-	 * 		实名认证除了验证手机号，还需要验证当前用户的身份号信息
+	 * 新增咨询建议信息 [支持实名咨询，匿名咨询] 实名认证除了验证手机号，还需要验证当前用户的身份号信息
+	 * 
 	 * @project GrapeSuggest
 	 * @package interfaceApplication
 	 * @file Suggest.java
@@ -57,34 +63,38 @@ public class Suggest {
 	 */
 	@SuppressWarnings("unchecked")
 	public String AddSuggest(String info) {
-		int code = 99;
-		// JSONObject object = JSONHelper.string2json(info);
+		// int code = 99;
+		String result = resultMessage(99);
 		JSONObject object = model.check(info, def());
-		if (object != null) {
-			try {
-				String content = (String) object.get("content");
-				JSONObject keywords = (JSONObject) appsProxy.proxyCall(getHost(0),
-						APPID + "/106/KeyWords/CheckKeyWords/" + content, null, "");
-				long codes = (Long) keywords.get("errorcode");
-				if (codes == 3) {
-					return resultMessage(3);
-				}
-				int mode = Integer.parseInt(object.get("mode").toString());
-				if (mode == 1) {
-					if (UserInfo == null) {
-						return resultMessage(2);
+		if (UserInfo != null) {
+			if (object != null) {
+				try {
+					String content = (String) object.get("content");
+					String key = appsProxy
+							.proxyCall(getHost(0), APPID + "/106/KeyWords/CheckKeyWords/" + content, null, "")
+							.toString();
+					JSONObject keywords = JSONHelper.string2json(key);
+					long codes = (Long) keywords.get("errorcode");
+					if (codes == 3) {
+						return resultMessage(3);
 					}
-					// 实名验证,发送短信验证码
-					return RealName(object);
+					int mode = Integer.parseInt(object.get("mode").toString());
+					if (mode == 1) {
+						// 实名验证,发送短信验证码
+						result = RealName(object);
+					} else {
+						object.put("content", encode(content));
+						result = insert(object.toString());
+					}
+				} catch (Exception e) {
+					nlogger.logout(e);
+					result = resultMessage(99);
 				}
-				object.put("content", encode(content));
-				return insert(object.toString());
-			} catch (Exception e) {
-				nlogger.logout(e);
-				code = 99;
 			}
+		} else {
+			return resultMessage(2);
 		}
-		return resultMessage(code, "提交咨询件失败");
+		return result;
 	}
 
 	/**
@@ -146,7 +156,7 @@ public class Suggest {
 		object.put("totalSize", (int) Math.ceil((double) array.size() / pageSize));
 		object.put("pageSize", pageSize);
 		object.put("currentPage", ids);
-		object.put("data", decode(array));
+		object.put("data", getImg(decode(array)));
 		return resultMessage(object);
 	}
 
@@ -185,7 +195,7 @@ public class Suggest {
 		object.put("totalSize", (int) Math.ceil((double) array.size() / pageSize));
 		object.put("pageSize", pageSize);
 		object.put("currentPage", ids);
-		object.put("data", decode(array));
+		object.put("data", getImg(decode(array)));
 		return resultMessage(object);
 	}
 
@@ -355,8 +365,9 @@ public class Suggest {
 		map.put("ownid", appsProxy.appid());
 		map.put("name", UserInfo != null ? UserInfo.get("name") : "");
 		map.put("consult", "");
-		map.put("attr", "");
-		map.put("mode", 1);
+		map.put("attrImg", ""); // 图片附件
+		map.put("attrVideo", ""); // 视频附件
+		map.put("mode", 0);
 		map.put("state", 0);
 		map.put("time", TimeHelper.nowMillis());
 		map.put("replyContent", ""); // 回复内容
@@ -391,13 +402,13 @@ public class Suggest {
 			String phone = UserInfo.get("mobphone").toString();
 			if (SendVerity(phone, "验证码:" + ckcode) == 0) {
 				object.put("content", encode(object.get("content").toString())); // 对咨询建议内容进行编码
-				String nextstep = APPID + "/106/Suggest/insert/" + object.toString();
+				String nextstep = APPID + "/108/Suggest/insert/" + object.toString();
 				JSONObject object2 = interrupt._exist(phone, String.valueOf(APPID));
 				if (object2 != null) {
 					code = interrupt._clear(phone, String.valueOf(APPID)) == true ? 0 : 99;
 				}
 				if (code == 0) {
-					boolean flag = interrupt._break(ckcode, phone, nextstep, String.valueOf(APPID));
+					boolean flag = interrupt._breakMust(ckcode, phone, nextstep, String.valueOf(APPID));
 					code = flag ? 0 : 99;
 				}
 			}
@@ -612,6 +623,86 @@ public class Suggest {
 		return object;
 	}
 
+	@SuppressWarnings("unchecked")
+	private JSONArray getImg(JSONArray array) {
+		JSONArray array2 = null;
+		if (array != null) {
+			try {
+				array2 = new JSONArray();
+				if (array.size() == 0) {
+					return array;
+				}
+				for (int i = 0; i < array.size(); i++) {
+					JSONObject object = (JSONObject) array.get(i);
+					array2.add(getImg(object));
+				}
+			} catch (Exception e) {
+				array2 = null;
+			}
+		}
+		return array2;
+	}
+
+	@SuppressWarnings("unchecked")
+	private JSONObject getImg(JSONObject object) {
+		if (object != null) {
+			try {
+				if (object.containsKey("attr") && !("").equals(object.get("attr").toString())) {
+					String attr = object.get("attr").toString();
+					String[] value = attr.split(",");
+					for (int i = 0; i < value.length; i++) {
+						object = getFile("attrFile" + i, value[i], object);
+					}
+				}
+				if (imgList.size() != 0) {
+					object.put("image", StringHelper.join(imgList));
+				} else {
+					object.put("image", "");
+				}
+				if (videoList.size() != 0) {
+					object.put("video", StringHelper.join(videoList));
+				} else {
+					object.put("video", "");
+				}
+			} catch (Exception e) {
+				object = null;
+			}
+		}
+		return object;
+	}
+	@SuppressWarnings("unchecked")
+	private JSONObject getFile(String key, String imgid, JSONObject object) {
+		CacheHelper cache = new CacheHelper();
+		if (object != null && !("").equals(object)) {
+			if (!("").equals(imgid)) {
+				String fileInfo = "";
+				if (cache.get(imgid) != null) {
+					fileInfo = cache.get(imgid).toString();
+				} else {
+					// 获取文件对象getAppIp("file")
+					String imgurl = "http://" + getAppIp("file").split("/")[1];
+					fileInfo = appsProxy.proxyCall(imgurl, appsProxy.appid() + "/24/Files/getFile/" + imgid, null, "").toString();
+					if (!("").equals(fileInfo) && fileInfo != null) {
+						fileInfo = JSONHelper.string2json(fileInfo).get("message").toString();
+						cache.setget(imgid, fileInfo);
+					}
+				}
+				if (("").equals(fileInfo)) {
+					object.put(key, "");
+				} else {
+					JSONObject object2 = JSONHelper.string2json(fileInfo);
+					object.put(key, object2);
+					if ("1".equals(object2.get("filetype").toString())) {
+						imgList.add("http://" + getAppIp("file").split("/")[1] + object2.get("filepath").toString());
+					}
+					if ("2".equals(object2.get("filetype").toString())) {
+						videoList.add("http://" + getAppIp("file").split("/")[1] + object2.get("filepath").toString());
+					}
+				}
+			}
+		}
+		return object;
+	}
 	/**
 	 * 获取URLConfig.properties配置文件中内网url地址，外网url地址
 	 * 
