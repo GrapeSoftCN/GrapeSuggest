@@ -8,11 +8,11 @@ import java.util.Map.Entry;
 import org.json.simple.JSONObject;
 
 import apps.appsProxy;
-import authority.userDBHelper;
+import check.formHelper;
+import check.formHelper.formdef;
 import database.db;
+import database.userDBHelper;
 import esayhelper.JSONHelper;
-import esayhelper.formHelper;
-import esayhelper.formHelper.formdef;
 import nlogger.nlogger;
 import rpc.execRequest;
 
@@ -21,8 +21,8 @@ public class SuggestModel {
 	private static formHelper form;
 	
 	static{
-		suggest = new userDBHelper("suggest", (String) execRequest.getChannelValue("sid"));
-		nlogger.logout((String) execRequest.getChannelValue("sid"));
+		String sid = (String) execRequest.getChannelValue("sid");
+		suggest = new userDBHelper("suggest",sid );
 		form = suggest.getChecker();
 	}
 	public SuggestModel() {

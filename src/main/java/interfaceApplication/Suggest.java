@@ -11,6 +11,8 @@ import org.bson.types.ObjectId;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+
 import apps.appsProxy;
 import authority.privilige;
 import database.db;
@@ -32,10 +34,10 @@ public class Suggest {
 	private static SuggestModel model;
 	private static session session;
 	private static int APPID = appsProxy.appid();
-	private static JSONObject UserInfo = new JSONObject();
+	private static JSONObject UserInfo = null;
 	private static HashMap<String, Object> map;
-	private List<String> imgList = new ArrayList<String>();
-	private List<String> videoList = new ArrayList<String>();
+	private List<String> imgList;
+	private List<String> videoList;
 
 	static {
 		map = new HashMap<String, Object>();
@@ -45,12 +47,16 @@ public class Suggest {
 	}
 
 	public Suggest() {
-		UserInfo = session.getSession((String) execRequest.getChannelValue("sid"));
+		String SID = (String) execRequest.getChannelValue("sid");
+		if (SID != null) {
+			UserInfo = new JSONObject();
+			UserInfo = session.getSession(SID);
+		}
 		nlogger.logout("userinfo:" + UserInfo);
 	}
 
 	/**
-	 * 新增咨询建议信息 [支持实名咨询，匿名咨询] 实名认证除了验证手机号，还需要验证当前用户的身份号信息
+	 * 新增咨询建议信息
 	 * 
 	 * @project GrapeSuggest
 	 * @package interfaceApplication
@@ -61,38 +67,28 @@ public class Suggest {
 	 * @return
 	 *
 	 */
-	@SuppressWarnings("unchecked")
 	public String AddSuggest(String info) {
-		// int code = 99;
 		String result = resultMessage(99);
 		JSONObject object = model.check(info, def());
-		if (UserInfo != null) {
-			if (object != null) {
-				try {
-					String content = (String) object.get("content");
-					String key = appsProxy
-							.proxyCall(getHost(0), APPID + "/106/KeyWords/CheckKeyWords/" + content, null, "")
-							.toString();
-					JSONObject keywords = JSONHelper.string2json(key);
-					long codes = (Long) keywords.get("errorcode");
-					if (codes == 3) {
-						return resultMessage(3);
-					}
-					int mode = Integer.parseInt(object.get("mode").toString());
-					if (mode == 1) {
-						// 实名验证,发送短信验证码
-						result = RealName(object);
-					} else {
-						object.put("content", encode(content));
-						result = insert(object.toString());
-					}
-				} catch (Exception e) {
-					nlogger.logout(e);
-					result = resultMessage(99);
-				}
-			}
-		} else {
+		if (UserInfo == null) {
 			return resultMessage(2);
+		}
+		if (object == null) {
+			return resultMessage(1);
+		}
+		try {
+			String content = (String) object.get("content");
+			String key = appsProxy.proxyCall(getHost(0), APPID + "/106/KeyWords/CheckKeyWords/" + content, null, "")
+					.toString();
+			JSONObject keywords = JSONHelper.string2json(key);
+			long codes = (Long) keywords.get("errorcode");
+			if (codes == 3) {
+				return resultMessage(3);
+			}
+			result = add(object);
+		} catch (Exception e) {
+			Print(e);
+			result = resultMessage(99);
 		}
 		return result;
 	}
@@ -121,14 +117,14 @@ public class Suggest {
 					object.put("replyTime", TimeHelper.nowMillis());
 				}
 				if (!object.containsKey("state")
-						|| (object.containsKey("state") && !("2").equals(object.get("state")))) {
+						|| (object.containsKey("state") && !("2").equals(object.get("state").toString()))) {
 					object.put("state", 2);
 				}
 				object.put("replyContent", encode((String) object.get("replyContent")));
 				object = JSONHelper.string2json(update(id, object.toString()));
 				code = Integer.parseInt(String.valueOf((Long) object.get("errorcode")));
 			} catch (Exception e) {
-				nlogger.logout(e);
+				Print(e);
 				code = 99;
 			}
 		}
@@ -151,9 +147,26 @@ public class Suggest {
 	 */
 	@SuppressWarnings("unchecked")
 	public String Page(int ids, int pageSize) {
+		JSONArray array = new JSONArray();
 		JSONObject object = new JSONObject();
-		JSONArray array = model.getdb().page(ids, pageSize);
-		object.put("totalSize", (int) Math.ceil((double) array.size() / pageSize));
+		int role = getRoleSign();
+		try {
+			db db = model.getdb();
+			// 获取角色权限
+			if (role == 5 || role == 4) {
+				array = db.desc("time").page(ids, pageSize);
+			} else if (role == 3 || role == 2 || role == 1) {
+				db.eq("wbid", (String) UserInfo.get("currentWeb"));
+				array = db.dirty().desc("time").page(ids, pageSize);
+			} else {
+				db.eq("slevel", 0);
+				array = db.dirty().desc("time").page(ids, pageSize);
+			}
+			object.put("totalSize", (int) Math.ceil((double) db.count() / pageSize));
+		} catch (Exception e) {
+			nlogger.logout(e);
+			object.put("totalSize", 0);
+		}
 		object.put("pageSize", pageSize);
 		object.put("currentPage", ids);
 		object.put("data", getImg(decode(array)));
@@ -174,31 +187,102 @@ public class Suggest {
 	 * @return
 	 *
 	 */
+	/*
 	@SuppressWarnings("unchecked")
 	public String PageBy(int ids, int pageSize, String info) {
+		int role = getRoleSign();
 		db db = model.getdb();
 		JSONObject object = new JSONObject();
 		JSONArray array = new JSONArray();
 		JSONObject obj = JSONHelper.string2json(info);
-		if (obj != null) {
+		try {
 			db.and();
-			for (Object objs : object.keySet()) {
+			for (Object objs : obj.keySet()) {
 				if (objs.equals("_id")) {
-					db.eq("_id", new ObjectId(object.get("_id").toString()));
+					System.out.println(obj.get("_id").toString());
+					db.eq("_id", new ObjectId(obj.get("_id").toString()));
+				} else if (objs.equals("wbid")) {
+					// 查询所有的子站id
+					String string = "{\"fatherid\":\"" + obj.get("wbid").toString() + "\"}";
+					String webinfo = appsProxy.proxyCall(getHost(0), APPID + "/17/WebInfo/Webfind/" + string, null, "")
+							.toString();
+					String wbid = getSubWeb(webinfo);
+					String[] value = wbid.split(",");
+					db.or();
+					for (String string2 : value) {
+						db.eq("_id", new ObjectId(string2));
+					}
+				} else {
+					db.eq(objs.toString(), obj.get(objs.toString()));
 				}
-				db.eq(objs.toString(), object.get(objs.toString()));
 			}
-			array = db.page(ids, pageSize);
-		} else {
-			array = model.getdb().eq("state", 2).select();
+			// 获取角色权限
+			if (role == 5 || role == 4) {
+				array = db.dirty().desc("time").page(ids, pageSize);
+			} else if (role == 3 || role == 2 || role == 1) {
+				db.eq("wbid", (String) UserInfo.get("currentWeb"));
+				array = db.dirty().desc("time").page(ids, pageSize);
+			} else {
+				db.eq("slevel", 0);
+				array = db.dirty().desc("time").page(ids, pageSize);
+			}
+			object.put("totalSize", (int) Math.ceil((double) db.count() / pageSize));
+		} catch (Exception e) {
+			Print(e);
+			object.put("totalSize", 0);
 		}
-		object.put("totalSize", (int) Math.ceil((double) array.size() / pageSize));
 		object.put("pageSize", pageSize);
 		object.put("currentPage", ids);
 		object.put("data", getImg(decode(array)));
 		return resultMessage(object);
 	}
-
+	*/
+	
+	@SuppressWarnings("unchecked")
+	public String PageBy(int idx, int pageSize, String info) {
+		db db = model.getdb();
+		int role = getRoleSign();
+		JSONObject rs = new JSONObject();
+		JSONArray conds = JSONHelper.string2array(info);
+		JSONArray data = null;
+		db = db.where( conds);
+		switch (role) {
+		case 5:	//管理员
+		case 4:
+			break;
+		case 3:	//网站管理员
+		case 2:
+		case 1:
+			String curweb = (String)UserInfo.get("currentWeb");
+			if( curweb != null ){
+				String webTree = (String)appsProxy.proxyCall(getHost(0), "13/17/WebInfo/getWebTree/" + curweb, null, null);
+				String[] webtree = webTree.split(",");
+				int i;
+				int l = webtree.length;
+				db.or();
+				for(i =0;i<l;i++){
+					db.eq("wbid", webtree[i]);
+				}
+			}
+			else {
+				db.eq("wbid", "");
+			}
+			break;
+		default:
+			db.eq("slevel", 0);
+			break;
+		}
+		data = db.dirty().desc("time").page(idx, pageSize);
+		if( data != null ){
+			int l= (int) Math.ceil((double) db.count() / pageSize);
+			rs.put("totalSize",l);
+			rs.put("pageSize", pageSize);
+			rs.put("currentPage", idx);
+			rs.put("data", getImg(decode(data)));
+		}
+		return resultMessage(rs);
+	}
+	
 	/**
 	 * 新增操作
 	 * 
@@ -215,7 +299,7 @@ public class Suggest {
 		try {
 			code = model.getdb().data(info).insertOnce() != null ? 0 : 99;
 		} catch (Exception e) {
-			nlogger.logout(e);
+			Print(e);
 			code = 99;
 		}
 		return resultMessage(code, "提交成功");
@@ -238,7 +322,7 @@ public class Suggest {
 		try {
 			code = model.getdb().eq("_id", new ObjectId(id)).data(info).update() != null ? 0 : 99;
 		} catch (Exception e) {
-			nlogger.logout(e);
+			Print(e);
 			code = 99;
 		}
 		return resultMessage(code, "修改成功");
@@ -253,7 +337,7 @@ public class Suggest {
 	 * 
 	 * @param id
 	 * @param info
-	 *            不包含审核状态，则默认为通过审核 即 reviewstate为0
+	 *            不包含审核状态,则默认为通过审核 ,即 reviewstate为0（内容进行base64编码）
 	 * @return
 	 *
 	 */
@@ -275,7 +359,7 @@ public class Suggest {
 					obj = JSONHelper.string2json(update(id, obj.toString()));
 					code = Integer.parseInt(String.valueOf((Long) obj.get("errorcode")));
 				} catch (Exception e) {
-					nlogger.logout(e);
+					Print(e);
 					code = 99;
 				}
 			}
@@ -345,28 +429,159 @@ public class Suggest {
 	public String Resume(String ckcode, String IDCard) {
 		String string = resultMessage(99);
 		if (UserInfo != null) {
-			if (IDCard.equals(UserInfo.get("IDCard"))) {
-				int code = interrupt._resume(ckcode, UserInfo.get("mobphone").toString(), String.valueOf(APPID));
-				switch (code) {
-				case 0:
-					string = resultMessage(5);
-					break;
-				case 1:
-					string = resultMessage(6);
-					break;
+			try {
+				if (IDCard.equals(UserInfo.get("IDCard").toString())) {
+					int code = interrupt._resume(ckcode, UserInfo.get("mobphone").toString(), String.valueOf(APPID));
+					switch (code) {
+					case 0:
+						string = resultMessage(5);
+						break;
+					case 1:
+						string = resultMessage(6);
+						break;
+					}
+					string = resultMessage(0, "咨询建议提交成功");
 				}
-				string = resultMessage(0, "咨询建议提交成功");
+			} catch (Exception e) {
+				Print(e);
+				string = resultMessage(99);
 			}
 		}
 		return string;
 	}
 
+	/**
+	 * 对已回复的咨询件进行评分
+	 * 
+	 * @project GrapeSuggest
+	 * @package interfaceApplication
+	 * @file Suggest.java
+	 * 
+	 * @param id
+	 * @param score
+	 * @return
+	 *
+	 */
+	public String Score(String id, String score) {
+		String result = resultMessage(99);
+		JSONObject object = model.getdb().eq("_id", new ObjectId(id)).eq("state", 2).find();
+		if (object != null) {
+			try {
+				if (!score.contains("score")) {
+					score = "{\"score\":" + score + "}";
+				}
+				result = update(id, score);
+			} catch (Exception e) {
+				Print(e);
+				result = resultMessage(99);
+			}
+		}
+		return result;
+	}
+
+	// 设置咨询件状态为公开
+	public String setSelvel(String id) {
+		String[] value = getId(id);
+		int code = 99;
+		String condString = "{\"slevel\":0}";
+		try {
+			if (value.length == 1) {
+				code = model.getdb().eq("_id", new ObjectId(id)).data(condString).update() != null ? 0 : 99;
+			} else {
+				db db = model.getdb();
+				for (String _id : value) {
+					db.eq("_id", new ObjectId(_id));
+				}
+				code = db.data(condString).updateAll() == value.length ? 0 : 99;
+			}
+		} catch (Exception e) {
+			nlogger.logout(e);
+			code = 99;
+		}
+		return resultMessage(code, "咨询件公开设置成功");
+	}
+
+	// 显示某个企业下某个用户的所有咨询件信息
+	@SuppressWarnings("unchecked")
+	public String showByUser(int ids, int pagesize) {
+		JSONArray array = null;
+		JSONObject object = new JSONObject();
+		db db = model.getdb();
+		try {
+			if (UserInfo != null) {
+				JSONObject obj = (JSONObject) UserInfo.get("_id");
+				String userid = (String) obj.get("$oid");
+				String currentweb = (String) UserInfo.get("currentWeb");
+				db.eq("wbid", currentweb).eq("userid", userid);
+				array = model.getdb().page(ids, pagesize);
+				object.put("totalSize", (int) Math.ceil((double) db.count() / pagesize));
+			}else{
+				object.put("totalSize", 0);
+			}
+		} catch (Exception e) {
+			object.put("totalSize", 0);
+		}
+		object.put("pageSize", pagesize);
+		object.put("currentPage", ids);
+		object.put("data", getImg(decode(array)));
+		return resultMessage(object);
+	}
+
+	private String getSubWeb(String webinfo) {
+		JSONObject object;
+		String records;
+		List<String> list = new ArrayList<String>();
+		object = JSONHelper.string2json(webinfo);
+		if (object != null) {
+			object = (JSONObject) object.get("message");
+			if (object != null) {
+				JSONObject objID;
+				records = object.get("records").toString();
+				JSONArray array = JSONHelper.string2array(records);
+				for (int i = 0; i < array.size(); i++) {
+					object = (JSONObject) array.get(i);
+					objID = (JSONObject) object.get("_id");
+					list.add(objID.get("$oid").toString());
+				}
+			}
+		}
+		return StringHelper.join(list);
+	}
+
+	private String[] getId(String id) {
+		List<String> list = new ArrayList<String>();
+		JSONObject object;
+		String[] value = id.split(",");
+		for (String _id : value) {
+			object = model.getdb().eq("_id", new ObjectId(_id)).field("slevel").find();
+			if (object != null) {
+				String slevel = object.get("slevel").toString();
+				if (slevel.contains("$numberLong")) {
+					slevel = JSONHelper.string2json(slevel).get("$numberLong").toString();
+				}
+				if (!("0").equals(slevel)) {
+					list.add(_id);
+				}
+			}
+		}
+		return StringHelper.join(list).split(",");
+	}
+
 	private HashMap<String, Object> def() {
+		String name = "";
+		JSONObject object;
+		String _id = "";
+		if (UserInfo != null && UserInfo.size() != 0) {
+			name = (String) UserInfo.get("name");
+			object = (JSONObject) UserInfo.get("_id");
+			_id = object.get("$oid").toString();
+		}
 		map.put("ownid", appsProxy.appid());
-		map.put("name", UserInfo != null ? UserInfo.get("name") : "");
+		map.put("name", name);
+		map.put("userid", _id);
 		map.put("consult", "");
-		map.put("attrImg", ""); // 图片附件
-		map.put("attrVideo", ""); // 视频附件
+		map.put("attr", ""); // 图片附件
+		// map.put("attrVideo", ""); // 视频附件
 		map.put("mode", 0);
 		map.put("state", 0);
 		map.put("time", TimeHelper.nowMillis());
@@ -375,7 +590,28 @@ public class Suggest {
 		map.put("reviewstate", 0); // 审核回复状态
 		map.put("reviewContent", ""); // 审核回复 内容
 		map.put("reviewstate", 0); // 审核回复数据的时间
+		map.put("score", 0); // 评分
+		map.put("wbid", (UserInfo != null) ? UserInfo.get("currentWeb").toString() : ""); // 所属企业id
+		map.put("slevel", 1); // 是否公开 0：表示公开，默认为不公开
 		return map;
+	}
+
+	@SuppressWarnings("unchecked")
+	private String add(JSONObject object) {
+		String result = resultMessage(99);
+		int mode = Integer.parseInt(object.get("mode").toString());
+		try {
+			if (mode == 1) {
+				// 实名验证,发送短信验证码
+				result = RealName(object);
+			} else {
+				object.put("content", encode(object.get("content").toString()));
+				result = insert(object.toString());
+			}
+		} catch (Exception e) {
+			result = resultMessage(99);
+		}
+		return result;
 	}
 
 	/**
@@ -394,7 +630,7 @@ public class Suggest {
 	 */
 	@SuppressWarnings("unchecked")
 	private String RealName(JSONObject object) {
-		int code = 99;
+		int code = 0;
 		// 发送验证码
 		String ckcode = getValidateCode();
 		nlogger.logout("验证码：" + ckcode);
@@ -541,7 +777,7 @@ public class Suggest {
 	private int getRoleSign() {
 		int roleSign = 0; // 游客
 		String sid = (String) execRequest.getChannelValue("sid");
-		if (!sid.equals("0")) {
+		if (sid != null) {
 			try {
 				privilige privil = new privilige(sid);
 				int roleplv = privil.getRolePV();
@@ -596,15 +832,18 @@ public class Suggest {
 	 */
 	@SuppressWarnings("unchecked")
 	private JSONArray decode(JSONArray array) {
-		if (array.size() == 0) {
-			return array;
-		}
-		JSONArray array2 = new JSONArray();
-		JSONObject object = new JSONObject();
-		for (Object obj : array) {
-			object = (JSONObject) obj;
-			object = decode(object);
-			array2.add(object);
+		JSONArray array2 = null;
+		if (array != null) {
+			if (array.size() == 0) {
+				return array;
+			}
+			array2 = new JSONArray();
+			JSONObject object = new JSONObject();
+			for (Object obj : array) {
+				object = (JSONObject) obj;
+				object = decode(object);
+				array2.add(object);
+			}
 		}
 		return array2;
 	}
@@ -625,10 +864,9 @@ public class Suggest {
 
 	@SuppressWarnings("unchecked")
 	private JSONArray getImg(JSONArray array) {
-		JSONArray array2 = null;
+		JSONArray array2 = new JSONArray();
 		if (array != null) {
 			try {
-				array2 = new JSONArray();
 				if (array.size() == 0) {
 					return array;
 				}
@@ -637,7 +875,7 @@ public class Suggest {
 					array2.add(getImg(object));
 				}
 			} catch (Exception e) {
-				array2 = null;
+				array2 = new JSONArray();
 			}
 		}
 		return array2;
@@ -645,6 +883,8 @@ public class Suggest {
 
 	@SuppressWarnings("unchecked")
 	private JSONObject getImg(JSONObject object) {
+		imgList = new ArrayList<String>();
+		videoList = new ArrayList<String>();
 		if (object != null) {
 			try {
 				if (object.containsKey("attr") && !("").equals(object.get("attr").toString())) {
@@ -670,6 +910,7 @@ public class Suggest {
 		}
 		return object;
 	}
+
 	@SuppressWarnings("unchecked")
 	private JSONObject getFile(String key, String imgid, JSONObject object) {
 		CacheHelper cache = new CacheHelper();
@@ -680,8 +921,11 @@ public class Suggest {
 					fileInfo = cache.get(imgid).toString();
 				} else {
 					// 获取文件对象getAppIp("file")
-					String imgurl = "http://" + getAppIp("file").split("/")[1];
-					fileInfo = appsProxy.proxyCall(imgurl, appsProxy.appid() + "/24/Files/getFile/" + imgid, null, "").toString();
+					// String imgurl = "http://" +
+					// getAppIp("file").split("/")[1];
+					fileInfo = appsProxy
+							.proxyCall(getFile(1), appsProxy.appid() + "/24/Files/getFile/" + imgid, null, "")
+							.toString();
 					if (!("").equals(fileInfo) && fileInfo != null) {
 						fileInfo = JSONHelper.string2json(fileInfo).get("message").toString();
 						cache.setget(imgid, fileInfo);
@@ -703,6 +947,7 @@ public class Suggest {
 		}
 		return object;
 	}
+
 	/**
 	 * 获取URLConfig.properties配置文件中内网url地址，外网url地址
 	 * 
@@ -751,8 +996,50 @@ public class Suggest {
 		return host;
 	}
 
+	/**
+	 * 获取文件url[内网url或者外网url]，0表示内网，1表示外网
+	 * 
+	 * @project GrapeSuggest
+	 * @package interfaceApplication
+	 * @file Suggest.java
+	 * 
+	 * @param signal
+	 *            0或者1 0表示内网，1表示外网
+	 * @return
+	 *
+	 */
+	private String getFile(int signal) {
+		String host = null;
+		try {
+			if (signal == 0 || signal == 1) {
+				host = getAppIp("file").split("/")[signal];
+			}
+		} catch (Exception e) {
+			nlogger.logout(e);
+			host = null;
+		}
+		return "http://" + host;
+	}
+
 	private String resultMessage(int num) {
 		return resultMessage(num, "");
+	}
+
+	/**
+	 * 打印错误信息【方便解决错误】
+	 * 
+	 * @project GrapeSuggest
+	 * @package interfaceApplication
+	 * @file Suggest.java
+	 * 
+	 * @param e
+	 * @return 出现错误方法名称：错误的行号：错误信息主体，例：PageBy:181:java.lang.NullPointerException
+	 *
+	 */
+	private void Print(Exception e) {
+		StackTraceElement stack = e.getStackTrace()[0];
+		String msg = stack.getMethodName() + ":" + stack.getLineNumber() + ":" + e;
+		nlogger.logout(msg);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -764,6 +1051,7 @@ public class Suggest {
 		return resultMessage(0, _obj.toString());
 	}
 
+
 	private String resultMessage(int num, String message) {
 		String msg = "";
 		switch (num) {
@@ -771,7 +1059,7 @@ public class Suggest {
 			msg = message;
 			break;
 		case 1:
-			msg = "";
+			msg = "必填项不能为空";
 			break;
 		case 2:
 			msg = "请登录之后，再进行咨询";
