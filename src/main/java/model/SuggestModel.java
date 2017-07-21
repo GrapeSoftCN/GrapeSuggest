@@ -16,15 +16,13 @@ import json.JSONHelper;
 import rpc.execRequest;
 
 public class SuggestModel {
-	private static userDBHelper suggest;
-	private static formHelper form;
+	private userDBHelper suggest;
+	private formHelper form;
 	
-	static{
+	public SuggestModel() {
 		String sid = (String) execRequest.getChannelValue("sid");
 		suggest = new userDBHelper("suggest",sid );
 		form = suggest.getChecker();
-	}
-	public SuggestModel() {
 		form.putRule("content", formdef.notNull);
 	}
 	public JSONObject check(String info,HashMap<String, Object> map) {

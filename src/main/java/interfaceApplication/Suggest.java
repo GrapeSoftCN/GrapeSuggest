@@ -27,23 +27,21 @@ import string.StringHelper;
 import time.TimeHelper;
 
 public class Suggest {
-	private static JSONObject _obj;
-	private static SuggestModel model;
-	private static session session;
-	private static int APPID = appsProxy.appid();
-	private static JSONObject UserInfo = null;
-	private static HashMap<String, Object> map;
+	private JSONObject _obj;
+	private SuggestModel model;
+	private session session;
+	private int APPID = appsProxy.appid();
+	private JSONObject UserInfo = null;
+	private HashMap<String, Object> map;
 	private List<String> imgList;
 	private List<String> videoList;
 
-	static {
+
+	public Suggest() {
 		map = new HashMap<String, Object>();
 		_obj = new JSONObject();
 		model = new SuggestModel();
 		session = new session();
-	}
-
-	public Suggest() {
 		String SID = (String) execRequest.getChannelValue("sid");
 		if (SID != null) {
 			UserInfo = new JSONObject();
@@ -78,18 +76,19 @@ public class Suggest {
 			String content = (String) object.get("content");
 			content = codec.DecodeHtmlTag(content);
 			content = codec.decodebase64(content);
-//			JSONObject obj = new JSONObject("content", content);
-//			String key = appsProxy.proxyCall(getHost(0), APPID + "/106/KeyWords/CheckKeyWords/" + obj.toString(), null, "")
-//					.toString();
-//			JSONObject keywords = JSONHelper.string2json(key);
-//			long codes = (Long) keywords.get("errorcode");
-//			if (codes == 3) {
-//				return resultMessage(3);
-//			}
+			// JSONObject obj = new JSONObject("content", content);
+			// String key = appsProxy.proxyCall(getHost(0), APPID +
+			// "/106/KeyWords/CheckKeyWords/" + obj.toString(), null, "")
+			// .toString();
+			// JSONObject keywords = JSONHelper.string2json(key);
+			// long codes = (Long) keywords.get("errorcode");
+			// if (codes == 3) {
+			// return resultMessage(3);
+			// }
 			object.put("content", content);
 			result = add(object);
 		} catch (Exception e) {
-			Print(e);
+			nlogger.logout(e);
 			result = resultMessage(99);
 		}
 		return result;
@@ -111,6 +110,10 @@ public class Suggest {
 	 */
 	@SuppressWarnings("unchecked")
 	public String Reply(String id, String replyContent) {
+		int role = getRoleSign();
+		if (role ==6 ) {
+			return resultMessage(7);
+		}
 		JSONObject object = JSONHelper.string2json(replyContent);
 		int code = 99;
 		if (object != null) {
@@ -126,7 +129,7 @@ public class Suggest {
 				object = JSONHelper.string2json(update(id, object.toString()));
 				code = Integer.parseInt(String.valueOf((Long) object.get("errorcode")));
 			} catch (Exception e) {
-				Print(e);
+				nlogger.logout(e);
 				code = 99;
 			}
 		}
@@ -155,7 +158,7 @@ public class Suggest {
 		try {
 			db db = model.getdb();
 			// 获取角色权限
-			if (role == 5 || role == 4) {
+			if (role == 6 || role == 5 || role == 4) {
 				array = db.desc("time").page(ids, pageSize);
 			} else if (role == 3 || role == 2 || role == 1) {
 				db.eq("wbid", (String) UserInfo.get("currentWeb"));
@@ -225,6 +228,7 @@ public class Suggest {
 		JSONArray data = null;
 		db = db.where(conds);
 		switch (role) {
+		case 6: // jw
 		case 5: // 管理员
 		case 4:
 			break;
@@ -278,7 +282,7 @@ public class Suggest {
 		try {
 			code = model.getdb().data(info).insertOnce() != null ? 0 : 99;
 		} catch (Exception e) {
-			Print(e);
+			nlogger.logout(e);
 			code = 99;
 		}
 		return resultMessage(code, "提交成功");
@@ -297,11 +301,15 @@ public class Suggest {
 	 *
 	 */
 	public String update(String id, String info) {
+		int role = getRoleSign();
+		if (role ==6 ) {
+			return resultMessage(7);
+		}
 		int code = 99;
 		try {
 			code = model.getdb().eq("_id", new ObjectId(id)).data(info).update() != null ? 0 : 99;
 		} catch (Exception e) {
-			Print(e);
+			nlogger.logout(e);
 			code = 99;
 		}
 		return resultMessage(code, "修改成功");
@@ -324,6 +332,9 @@ public class Suggest {
 	public String Review(String id, String info) {
 		int code = 99;
 		int role = getRoleSign();
+		if (role ==6 ) {
+			return resultMessage(7);
+		}
 		if (role >= 4) {
 			JSONObject obj = JSONHelper.string2json(info);
 			if (obj != null) {
@@ -338,7 +349,7 @@ public class Suggest {
 					obj = JSONHelper.string2json(update(id, obj.toString()));
 					code = Integer.parseInt(String.valueOf((Long) obj.get("errorcode")));
 				} catch (Exception e) {
-					Print(e);
+					nlogger.logout(e);
 					code = 99;
 				}
 			}
@@ -422,7 +433,7 @@ public class Suggest {
 					string = resultMessage(0, "咨询建议提交成功");
 				}
 			} catch (Exception e) {
-				Print(e);
+				nlogger.logout(e);
 				string = resultMessage(99);
 			}
 		}
@@ -442,6 +453,10 @@ public class Suggest {
 	 *
 	 */
 	public String Score(String id, String score) {
+		int role = getRoleSign();
+		if (role ==6 ) {
+			return resultMessage(7);
+		}
 		String result = resultMessage(99);
 		JSONObject object = model.getdb().eq("_id", new ObjectId(id)).eq("state", 2).find();
 		if (object != null) {
@@ -451,7 +466,7 @@ public class Suggest {
 				}
 				result = update(id, score);
 			} catch (Exception e) {
-				Print(e);
+				nlogger.logout(e);
 				result = resultMessage(99);
 			}
 		}
@@ -460,6 +475,10 @@ public class Suggest {
 
 	// 设置咨询件状态为公开
 	public String setSelvel(String id) {
+		int role = getRoleSign();
+		if (role ==6 ) {
+			return resultMessage(7);
+		}
 		String[] value = getId(id);
 		int code = 99;
 		String condString = "{\"slevel\":0}";
@@ -502,6 +521,7 @@ public class Suggest {
 				object.put("totalSize", 0);
 			}
 		} catch (Exception e) {
+			nlogger.logout(e);
 			object.put("totalSize", 0);
 		}
 		object.put("pageSize", pagesize);
@@ -599,6 +619,7 @@ public class Suggest {
 				result = insert(object.toString());
 			}
 		} catch (Exception e) {
+			nlogger.logout(e);
 			result = resultMessage(99);
 		}
 		return result;
@@ -783,8 +804,11 @@ public class Suggest {
 				if (roleplv >= 8000 && roleplv < 10000) {
 					roleSign = 4; // 监督管理员
 				}
-				if (roleplv >= 10000) {
+				if (roleplv >= 10000 && roleplv < 12000) {
 					roleSign = 5; // 总管理员
+				}
+				if (roleplv >= 12000) {
+					roleSign = 6; // jw
 				}
 			} catch (Exception e) {
 				nlogger.logout(e);
@@ -841,16 +865,16 @@ public class Suggest {
 	@SuppressWarnings("unchecked")
 	private JSONObject decode(JSONObject object) {
 		if (object.containsKey("content") && object.get("content") != null) {
-//			String content =object.get("content").toString();
+			// String content =object.get("content").toString();
 			String content = (String) object.escapeHtmlGet("content");
 			object.put("content", codec.decodebase64(content));
 		}
 		if (object.containsKey("replyContent") && object.get("replyContent") != null) {
-			String replyContent =object.get("replyContent").toString();
+			String replyContent = object.get("replyContent").toString();
 			object.put("replyContent", codec.decodebase64(replyContent));
 		}
 		if (object.containsKey("reviewContent") && object.get("reviewContent") != null) {
-			String reviewContent =object.get("reviewContent").toString();
+			String reviewContent = object.get("reviewContent").toString();
 			object.put("reviewContent", codec.decodebase64(reviewContent));
 		}
 		return object;
@@ -1011,6 +1035,7 @@ public class Suggest {
 			pro.load(new FileInputStream("URLConfig.properties"));
 			value = pro.getProperty(key);
 		} catch (Exception e) {
+			nlogger.logout(e);
 			value = "";
 		}
 		return value;
@@ -1086,7 +1111,6 @@ public class Suggest {
 		String msg = stack.getMethodName() + ":" + stack.getLineNumber() + ":" + e;
 		nlogger.logout(msg);
 	}
-
 	@SuppressWarnings("unchecked")
 	private String resultMessage(JSONObject object) {
 		if (object == null) {
@@ -1119,6 +1143,9 @@ public class Suggest {
 			break;
 		case 6:
 			msg = "验证码错误";
+			break;
+		case 7:
+			msg = "没有该操作权限";
 			break;
 		default:
 			msg = "其他操作异常";
