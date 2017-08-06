@@ -47,7 +47,6 @@ public class Suggest {
 			UserInfo = new JSONObject();
 			UserInfo = session.getSession(SID);
 		}
-		nlogger.logout("sid:" + SID);
 	}
 
 	/**
@@ -76,15 +75,6 @@ public class Suggest {
 			String content = (String) object.get("content");
 			content = codec.DecodeHtmlTag(content);
 			content = codec.decodebase64(content);
-			// JSONObject obj = new JSONObject("content", content);
-			// String key = appsProxy.proxyCall(getHost(0), APPID +
-			// "/106/KeyWords/CheckKeyWords/" + obj.toString(), null, "")
-			// .toString();
-			// JSONObject keywords = JSONHelper.string2json(key);
-			// long codes = (Long) keywords.get("errorcode");
-			// if (codes == 3) {
-			// return resultMessage(3);
-			// }
 			object.put("content", content);
 			result = add(object);
 		} catch (Exception e) {
@@ -237,8 +227,9 @@ public class Suggest {
 		case 1:
 			String curweb = (String) UserInfo.get("currentWeb");
 			if (curweb != null) {
-				String webTree = (String) appsProxy.proxyCall(getHost(0), "13/17/WebInfo/getWebTree/" + curweb, null,
-						null);
+//				String webTree = (String) appsProxy.proxyCall(getHost(0), "13/17/WebInfo/getWebTree/" + curweb, null,
+//						null);
+				String webTree = appsProxy.proxyCall("/GrapeWebInfo/WebInfo/getWebTree/" + curweb).toString();
 				String[] webtree = webTree.split(",");
 				int i;
 				int l = webtree.length;
@@ -644,7 +635,6 @@ public class Suggest {
 		int code = 0;
 		// 发送验证码
 		String ckcode = getValidateCode();
-		nlogger.logout("验证码：" + ckcode);
 		try {
 			String phone = UserInfo.get("mobphone").toString();
 			if (SendVerity(phone, "验证码:" + ckcode) == 0) {
@@ -906,7 +896,7 @@ public class Suggest {
 					fid = StringHelper.fixString(fid, ',');
 				}
 				String fileInfo = appsProxy
-						.proxyCall(getFile(1), appsProxy.appid() + "/24/Files/getFiles/" + fid, null, "").toString();
+						.proxyCall("/GrapeFile/Files/getFiles/" + fid, null, "").toString();
 				JSONObject fileObj = JSONObject.toJSON(fileInfo);
 				JSONObject FileInfoObj;
 				if (fileObj != null) {
@@ -954,7 +944,7 @@ public class Suggest {
 			 */
 			if (!fid.equals("")) {
 				String fileInfo = appsProxy
-						.proxyCall(getFile(1), appsProxy.appid() + "/24/Files/getFiles/" + fid, null, "").toString();
+						.proxyCall("/GrapeFile/Files/getFiles/" + fid, null, "").toString();
 				JSONObject fileObj = JSONObject.toJSON(fileInfo);
 				JSONObject FileInfoObj;
 				if (fileObj != null) {
@@ -1109,7 +1099,6 @@ public class Suggest {
 	private void Print(Exception e) {
 		StackTraceElement stack = e.getStackTrace()[0];
 		String msg = stack.getMethodName() + ":" + stack.getLineNumber() + ":" + e;
-		nlogger.logout(msg);
 	}
 	@SuppressWarnings("unchecked")
 	private String resultMessage(JSONObject object) {
