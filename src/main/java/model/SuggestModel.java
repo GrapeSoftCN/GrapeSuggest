@@ -19,18 +19,15 @@ public class SuggestModel {
 	private userDBHelper suggest;
 	private formHelper form;
 	
-	public SuggestModel() {
-		String sid = (String) execRequest.getChannelValue("sid");
-		suggest = new userDBHelper("suggest",sid );
-		form = suggest.getChecker();
-		form.putRule("content", formdef.notNull);
-	}
+//	public SuggestModel() {
+//		String sid = (String) execRequest.getChannelValue("sid");
+//		suggest = new userDBHelper("suggest",sid );
+//		form = suggest.getChecker();
+//		form.putRule("content", formdef.notNull);
+//	}
 	public JSONObject check(String info,HashMap<String, Object> map) {
 		JSONObject object = AddMap(map, info);
 		return !form.checkRuleEx(object) ? null : object;
-	}
-	public db getdb() {
-		return suggest.bind(String.valueOf(appsProxy.appid()));
 	}
 	/**
 	 * 将map添加至JSONObject中

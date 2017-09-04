@@ -28,6 +28,6 @@
 			<attribute name="org.eclipse.jst.component.dependency" value="/WEB-INF/lib"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="C:/Users/win7/Desktop/GrapeFW/JAR/SDK/t9.31.jar"/>
+	<classpathentry kind="lib" path="C:/Users/win7/Desktop/GrapeFW/SDK/temp/t8.jar"/>
 	<classpathentry kind="output" path="target/classes"/>
 </classpath>
